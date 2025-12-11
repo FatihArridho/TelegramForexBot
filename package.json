@@ -1,0 +1,17 @@
+{
+  "name": "TelegramForexBot",
+  "version": "1.0.0",
+  "description": "Telegram Forex bot (XAUUSD etc.) with multi-owner and daily journal",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "author": "FatihArridho",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "fs-extra": "^11.1.1",
+    "node-cron": "^3.0.2",
+    "telegraf": "^4.12.2"
+  }
+}
