@@ -44,7 +44,7 @@ Mendukung **foto, caption, auto-pin, multi-owner, jurnal harian, dan reply statu
   ✔ TP dobel  
   ✔ Hit dobel  
   ✔ SL dobel  
-- **Jurnal harian otomatis** jam **23:11** (ke channel + owner DM)
+- **Jurnal harian otomatis** jam **23:30** (ke channel + owner DM)
 - Penyimpanan `data.json`:
   - sinyal aktif
   - jurnal profit/loss (dalam R)
