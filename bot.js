@@ -11,6 +11,7 @@
 // - Signal ID detection 100% akurat
 // - jurnal harian otomatis 23:30
 // - multi owner
+// - readable & stable
 // ==============================================
 
 require("dotenv").config();
@@ -19,12 +20,12 @@ const fs = require("fs-extra");
 const path = require("path");
 const cron = require("node-cron");
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHANNEL = process.env.CHANNEL_USERNAME;
+const BOT_TOKEN = process.env.BOT_TOKEN || "";
+const CHANNEL = process.env.CHANNEL_USERNAME || "";
 const OWNER_IDS_ENV = process.env.OWNER_IDS || "";
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, "data.json");
-const TIMEZONE = "Asia/Jakarta";
-const DAILY_CRON = "11 23 * * *";
+const TIMEZONE = process.env.TIMEZONE || "Asia/Jakarta";
+const DAILY_CRON = process.env.JOURNAL_CRON || "30 23 * * *";
 
 if (!BOT_TOKEN) throw new Error("BOT_TOKEN wajib di .env");
 
@@ -40,14 +41,13 @@ const db = {
     if (await fs.pathExists(DATA_FILE)) {
       this._data = await fs.readJson(DATA_FILE);
     } else {
-      const initial = {
+      this._data = {
         signals: [],
         journal: {},
         owners: OWNER_IDS_ENV.split(",")
           .map((x) => Number(x.trim()))
           .filter(Boolean),
       };
-      this._data = initial;
       await this.save();
     }
   },
@@ -61,12 +61,19 @@ const db = {
     return sig;
   },
 
+  updateSignal(id, obj) {
+    const i = this._data.signals.findIndex((s) => s.id === id);
+    if (i === -1) return null;
+    this._data.signals[i] = { ...this._data.signals[i], ...obj };
+    return this._data.signals[i];
+  },
+
   removeSignal(id) {
-    this._data.signals = this._data.signals.filter((x) => x.id !== id);
+    this._data.signals = this._data.signals.filter((s) => s.id !== id);
   },
 
   getSignal(id) {
-    return this._data.signals.find((x) => x.id === id);
+    return this._data.signals.find((s) => s.id === id);
   },
 
   isOwner(id) {
@@ -84,9 +91,9 @@ const db = {
 
   removeOwner(id) {
     id = Number(id);
-    const before = this._data.owners.length;
-    this._data.owners = this._data.owners.filter((x) => x !== id);
-    return this._data.owners.length !== before;
+    const old = this._data.owners.length;
+    this._data.owners = this._data.owners.filter((o) => o !== id);
+    return this._data.owners.length !== old;
   },
 
   listOwners() {
@@ -173,7 +180,6 @@ async function handleNewSignal(ctx, type) {
 
   await unpinAll();
 
-  // kirim ke channel
   let sent;
   if (photo)
     sent = await bot.telegram.sendPhoto(CHANNEL, photo, { caption: text });
@@ -185,7 +191,6 @@ async function handleNewSignal(ctx, type) {
   db.addSignal(sig);
   await db.save();
 
-  // DM owner
   const ownerText = `New signal posted:\n\n${text}`;
   for (const oid of db.listOwners()) {
     await bot.telegram.sendMessage(oid, ownerText);
@@ -242,18 +247,21 @@ bot.on("message", async (ctx) => {
   if (!sig) return ctx.reply("Signal tidak ditemukan.");
 
   const text = ctx.message.text?.trim().toLowerCase() || "";
-  if (!text) return ctx.reply("Ketik perintah: hit, sl, tp1..tp5, cancel");
+  if (!text)
+    return ctx.reply(
+      "Ketik perintah: cancel, hit, sl, tp1..tp5. Contoh:\ntp1 4120"
+    );
 
   const parts = text.split(/\s+/);
   const cmd = parts[0];
   const price = parts[1] ? Number(parts[1]) : undefined;
 
-  const img =
+  const photo =
     ctx.message.photo?.[ctx.message.photo.length - 1]?.file_id || null;
 
   function sendToChannel(msg) {
-    if (img)
-      return bot.telegram.sendPhoto(sig.posted.chatId, img, {
+    if (photo)
+      return bot.telegram.sendPhoto(sig.posted.chatId, photo, {
         caption: msg,
         reply_to_message_id: sig.posted.messageId,
       });
@@ -263,34 +271,43 @@ bot.on("message", async (ctx) => {
     });
   }
 
-  // ========= CANCEL =========
+  // CANCEL
   if (cmd === "cancel") {
     await sendToChannel(`❌ Cancel\nSignal ID: ${sig.id}`);
     db.removeSignal(sig.id);
     await db.save();
-    return ctx.reply("Signal di-cancel.");
+    return ctx.reply("Signal dicancel.");
   }
 
-  // ========= HIT / SL / TP =========
+  // HIT
   if (cmd === "hit") {
     if (sig.hits.entry) return ctx.reply("Entry sudah tercatat.");
     sig.hits.entry = true;
-    await sendToChannel(`Hit ✅\n${price ? "Price: " + price : ""}\nSignal ID: ${sig.id}`);
+    await sendToChannel(
+      `Hit ✅\n${price ? "Price: " + price : ""}\nSignal ID: ${sig.id}`
+    );
   }
 
+  // SL
   if (cmd === "sl") {
     if (sig.hits.sl) return ctx.reply("SL sudah tercatat.");
     sig.hits.sl = true;
-    await sendToChannel(`Stop Loss -1R\n${price ? "Price: " + price : ""}\nSignal ID: ${sig.id}`);
+    await sendToChannel(
+      `Stop Loss -1R\n${price ? "Price: " + price : ""}\nSignal ID: ${sig.id}`
+    );
   }
 
+  // TP
   if (/^tp[1-5]$/.test(cmd)) {
     const tpIndex = Number(cmd.slice(2)) - 1;
-    if (sig.hits.tp[tpIndex]) return ctx.reply(`TP ${tpIndex + 1} sudah tercatat.`);
-    sig.hits.tp[tpIndex] = true;
+    if (sig.hits.tp[tpIndex])
+      return ctx.reply(`TP ${tpIndex + 1} sudah tercatat.`);
 
+    sig.hits.tp[tpIndex] = true;
     await sendToChannel(
-      `Tp ${tpIndex + 1} ✅\n${price ? "Price: " + price : ""}\nSignal ID: ${sig.id}`
+      `Tp ${tpIndex + 1} ✅\n${price ? "Price: " + price : ""}\nSignal ID: ${
+        sig.id
+      }`
     );
   }
 
@@ -308,16 +325,16 @@ function formatJournal(date) {
   if (!list.length) return `Tidak ada jurnal di ${date}`;
 
   let txt = `Jurnal ${date}\n\n`;
-  let profitR = 0;
+  let total = 0;
 
   for (let i of list) {
-    profitR += i.profitR;
+    total += i.profitR;
     txt += `${i.symbol} ${i.action.toUpperCase()} | ${i.profitR.toFixed(
       2
     )} R\n`;
   }
 
-  txt += `\nTotal: ${profitR.toFixed(2)} R`;
+  txt += `\nTotal: ${total.toFixed(2)} R`;
   return txt;
 }
 
@@ -326,6 +343,7 @@ cron.schedule(
   async () => {
     const d = today();
     const text = formatJournal(d);
+
     await bot.telegram.sendMessage(CHANNEL, text);
     for (const oid of db.listOwners()) {
       await bot.telegram.sendMessage(oid, text);
